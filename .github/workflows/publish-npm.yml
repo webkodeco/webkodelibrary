@@ -91,6 +91,18 @@ jobs:
           PKG_VERSION=$(node -p "require('./package.json').version")
           test "$PKG_VERSION" = "${GITHUB_REF_NAME#v}" || (echo "dist package.json ($PKG_VERSION) != tag (${GITHUB_REF_NAME#v})" && exit 1)
 
+      - name: Add repository info to package.json
+        working-directory: ${{ steps.dist.outputs.path }}
+        run: |
+          node -e "
+            const fs = require('fs');
+            const pkg = require('./package.json');
+            pkg.repository = { type: 'git', url: 'https://github.com/webkodeco/webkodelibrary.git' };
+            pkg.homepage = 'https://github.com/webkodeco/webkodelibrary#readme';
+            pkg.bugs = { url: 'https://github.com/webkodeco/webkodelibrary/issues' };
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2));
+          "
+      
       # Publica
       - name: Publish from dist
         working-directory: ${{ steps.dist.outputs.path }}
