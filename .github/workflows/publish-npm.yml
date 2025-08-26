@@ -3,7 +3,7 @@ name: Publish Angular lib to npm
 on:
   push:
     tags:
-      - 'v*'                 # Se ejecuta cuando creas un tag tipo v1.2.3
+      - 'v*'
   workflow_dispatch: {}
 
 permissions:
@@ -13,23 +13,22 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    # Solo corre en eventos de tag
     if: startsWith(github.ref, 'refs/tags/')
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0      # Necesitamos historial para verificar pertenencia a main
+          fetch-depth: 0
 
-      # 🚧 BARRERA: Solo permitir si el tag pertenece a la historia de main
+      # Garantiza que el tag pertenece a main
       - name: Ensure tag commit is contained in main
         run: |
           git fetch --no-tags origin main
           if git merge-base --is-ancestor "$GITHUB_SHA" "origin/main"; then
-            echo "✅ Tag pertenece a la historia de main. Continuamos."
+            echo "✅ Tag pertenece a main"
           else
-            echo "⛔ Este tag NO está en main. Abortando publicación."
-            exit 78  # neutral cancel
+            echo "⛔ Tag NO pertenece a main"
+            exit 78
           fi
 
       - name: Setup Node
@@ -42,24 +41,46 @@ jobs:
       - name: Install deps
         run: npm ci
 
-      - name: Build lib
-        run: npm run build:kode-lib
+      # Detecta el primer proyecto tipo "library" en angular.json
+      - name: Detect Angular library project
+        id: detect
+        run: |
+          node -e "const a=require('./angular.json'); const name=Object.keys(a.projects).find(p=>a.projects[p].projectType==='library'); if(!name){process.exit(2)}; console.log(name)" > .libname
+          echo "name=$(cat .libname)" >> $GITHUB_OUTPUT
+          echo "📦 Library: $(cat .libname)"
 
+      # Compila SIN depender de scripts del package.json
+      - name: Build lib with Angular CLI
+        run: npx -y @angular/cli ng build ${{ steps.detect.outputs.name }}
+
+      # Obtiene el outputPath real (si no existe, usa dist/<name>)
+      - name: Resolve dist path
+        id: dist
+        run: |
+          node -e "const a=require('./angular.json'); const n='${{ steps.detect.outputs.name }}'; const p=a.projects[n]; const op=(p?.architect?.build?.options?.outputPath)||(`dist/${n}`); console.log(op)" > .distpath
+          echo "path=$(cat .distpath)" >> $GITHUB_OUTPUT
+          echo "📂 Dist: $(cat .distpath)"
+          test -d "$(cat .distpath)" || (echo "No existe carpeta dist" && exit 1)
+          ls -la "$(cat .distpath)"
+
+      # Sincroniza versión con el tag (vX.Y.Z)
       - name: Sync version with tag (in dist)
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          echo "Version from tag: $VERSION"
-          cd dist/ui-lib
+          echo "Version: $VERSION"
+          cd "${{ steps.dist.outputs.path }}"
           npm version "$VERSION" --no-git-tag-version
 
+      # Verifica versión
       - name: Check version = tag (dist)
         run: |
-          cd dist/ui-lib
+          cd "${{ steps.dist.outputs.path }}"
           PKG_VERSION=$(node -p "require('./package.json').version")
           test "$PKG_VERSION" = "${GITHUB_REF_NAME#v}" || (echo "dist package.json ($PKG_VERSION) != tag (${GITHUB_REF_NAME#v})" && exit 1)
 
+      # Publica
       - name: Publish from dist
-        working-directory: dist/ui-lib
+        working-directory: ${{ steps.dist.outputs.path }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --access public --provenance
