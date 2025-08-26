@@ -51,7 +51,7 @@ jobs:
 
       # Compila SIN depender de scripts del package.json
       - name: Build lib with Angular CLI
-        run: npx -y @angular/cli ng build ${{ steps.detect.outputs.name }}
+        run: npx -y @angular/cli build ${{ steps.detect.outputs.name }}
 
       # Obtiene el outputPath real (si no existe, usa dist/<name>)
       - name: Resolve dist path
