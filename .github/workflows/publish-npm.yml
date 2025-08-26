@@ -1,0 +1,65 @@
+name: Publish Angular lib to npm
+
+on:
+  push:
+    tags:
+      - 'v*'                 # Se ejecuta cuando creas un tag tipo v1.2.3
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # Solo corre en eventos de tag
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0      # Necesitamos historial para verificar pertenencia a main
+
+      # 🚧 BARRERA: Solo permitir si el tag pertenece a la historia de main
+      - name: Ensure tag commit is contained in main
+        run: |
+          git fetch --no-tags origin main
+          if git merge-base --is-ancestor "$GITHUB_SHA" "origin/main"; then
+            echo "✅ Tag pertenece a la historia de main. Continuamos."
+          else
+            echo "⛔ Este tag NO está en main. Abortando publicación."
+            exit 78  # neutral cancel
+          fi
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'npm'
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Build lib
+        run: npm run build:ui-lib
+
+      - name: Sync version with tag (in dist)
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "Version from tag: $VERSION"
+          cd dist/ui-lib
+          npm version "$VERSION" --no-git-tag-version
+
+      - name: Check version = tag (dist)
+        run: |
+          cd dist/ui-lib
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          test "$PKG_VERSION" = "${GITHUB_REF_NAME#v}" || (echo "dist package.json ($PKG_VERSION) != tag (${GITHUB_REF_NAME#v})" && exit 1)
+
+      - name: Publish from dist
+        working-directory: dist/ui-lib
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --provenance
