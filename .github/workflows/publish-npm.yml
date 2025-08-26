@@ -3,7 +3,7 @@ name: Publish Angular lib to npm
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
   workflow_dispatch: {}
 
 permissions:
@@ -35,8 +35,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          registry-url: 'https://registry.npmjs.org'
-          cache: 'npm'
+          registry-url: "https://registry.npmjs.org"
+          cache: "npm"
 
       - name: Install deps
         run: npm ci
@@ -53,12 +53,25 @@ jobs:
       - name: Build lib with Angular CLI
         run: npx -y @angular/cli build ${{ steps.detect.outputs.name }}
 
-      # Obtiene el outputPath real (si no existe, usa dist/<name>)
       - name: Resolve dist path
         id: dist
+        env:
+          LIB_NAME: ${{ steps.detect.outputs.name }}
         run: |
-          node -e "const a=require('./angular.json'); const n='${{ steps.detect.outputs.name }}'; const p=a.projects[n]; const op=(p?.architect?.build?.options?.outputPath)||(`dist/${n}`); console.log(op)" > .distpath
-          echo "path=$(cat .distpath)" >> $GITHUB_OUTPUT
+          # imprime y resuelve el outputPath sin usar backticks
+          node -e '
+            const a = require("./angular.json");
+            const n = process.env.LIB_NAME;
+            const p = a.projects[n] || {};
+            // Soporta angular.json con architect (v<15) y targets (v15+)
+            const op =
+              (p.architect && p.architect.build && p.architect.build.options && p.architect.build.options.outputPath) ||
+              (p.targets   && p.targets.build   && p.targets.build.options   && p.targets.build.options.outputPath) ||
+              ("dist/" + n);
+            console.log(op);
+          ' > .distpath
+
+          echo "path=$(cat .distpath)" >> "$GITHUB_OUTPUT"
           echo "📂 Dist: $(cat .distpath)"
           test -d "$(cat .distpath)" || (echo "No existe carpeta dist" && exit 1)
           ls -la "$(cat .distpath)"
